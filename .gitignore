@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+
+# Python backend (api)
+*.py[cod]
+__pycache__/
+*.egg-info/
+*.pytest_cache/
+.env
+.venv/
+venv/
+
+# Node frontend (web)
+web/node_modules/
+web/.pnp/
+web/.pnp.js
+web/coverage/
+web/build/
+web/.env.local
+web/.env.development.local
+web/.env.test.local
+web/.env.production.local
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
