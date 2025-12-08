@@ -1,86 +1,110 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { fetchPendingMatches, fetchMatchDetails, submitDecision } from '../api'; // Check your import path, user had '../api' in prompt but filename is just api.js context usually implies same dir or sibling. Kept user's convention if relative.
-import MatchCard from '../components/MatchCard'; // Adjusted path based on typical structure, check if it's ../components/MatchCard
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import MatchList from '../components/MatchList';
+import MatchCard from '../components/MatchCard';
 
 const Dashboard = () => {
-    const [matches, setMatches] = useState([]);
-    const [currentMatch, setCurrentMatch] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [pendingMatches, setPendingMatches] = useState([]);
+    const [selectedIds, setSelectedIds] = useState(null); // { id_a, id_b }
+    const [activeMatchData, setActiveMatchData] = useState(null);
+    const [loading, setLoading] = useState(false);
 
-    const loadMatchDetail = useCallback(async (idA, idB) => {
-        const details = await fetchMatchDetails(idA, idB);
-        if (details) {
-            setCurrentMatch({ ...details, id_a: idA, id_b: idB });
-        }
+    // 1. Load the List on Mount
+    useEffect(() => {
+        fetchPendingList();
     }, []);
 
-    const loadMatches = useCallback(async () => {
-        setLoading(true);
-        const list = await fetchPendingMatches();
-        setMatches(list);
-        
-        if (list.length > 0) {
-            loadMatchDetail(list[0].author_id_a, list[0].author_id_b);
-        } else {
-            setCurrentMatch(null);
-        }
-        setLoading(false);
-    }, [loadMatchDetail]);
-
+    // 2. When selection changes, fetch the full details for the Card
     useEffect(() => {
-        loadMatches();
-    }, [loadMatches]);
+        if (selectedIds) {
+            setLoading(true);
+            axios.get(`http://127.0.0.1:5000/api/match/${selectedIds.id_a}/${selectedIds.id_b}`)
+                .then(res => {
+                    // Inject IDs into the data so MatchCard can use them for API calls
+                    setActiveMatchData({
+                        ...res.data,
+                        author_a_id: selectedIds.id_a,
+                        author_b_id: selectedIds.id_b
+                    });
+                    setLoading(false);
+                })
+                .catch(err => {
+                    console.error("Failed to load details", err);
+                    setLoading(false);
+                });
+        }
+    }, [selectedIds]);
 
-    const handleDecision = async (decision) => {
-        if (!currentMatch) return;
-        
-        await submitDecision(currentMatch.id_a, currentMatch.id_b, decision);
-        await loadMatches();
+    const fetchPendingList = async () => {
+        try {
+            const res = await axios.get('http://127.0.0.1:5000/api/matches/pending');
+            setPendingMatches(res.data);
+            
+            // Auto-select the first item if nothing is selected and list is not empty
+            if (res.data.length > 0 && !selectedIds) {
+                setSelectedIds({ id_a: res.data[0].author_id_a, id_b: res.data[0].author_id_b });
+            }
+        } catch (err) {
+            console.error(err);
+        }
     };
 
-    if (loading && matches.length === 0) return <div>Loading Dashboard...</div>;
-    if (matches.length === 0) return <div style={{textAlign:'center', marginTop:'50px'}}>🎉 No pending matches! Great job.</div>;
+    const handleSelection = (id_a, id_b) => {
+        setSelectedIds({ id_a, id_b });
+    };
+
+    const handleDecisionComplete = () => {
+        // 1. Remove the processed item from the local list immediately (Optimistic UI)
+        const newList = pendingMatches.filter(m => 
+            !(m.author_id_a === selectedIds.id_a && m.author_id_b === selectedIds.id_b)
+        );
+        setPendingMatches(newList);
+        
+        // 2. Select the next item in line
+        if (newList.length > 0) {
+            setSelectedIds({ id_a: newList[0].author_id_a, id_b: newList[0].author_id_b });
+        } else {
+            setSelectedIds(null);
+            setActiveMatchData(null);
+        }
+    };
 
     return (
-        <div style={{ fontFamily: 'Arial, sans-serif' }}>
-            <header style={{ background: '#333', color: '#fff', padding: '15px', textAlign: 'center' }}>
-                <h2>Admin Disambiguation Dashboard</h2>
-                <p>{matches.length} items pending review</p>
-            </header>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+            {/* LEFT: The List */}
+            <MatchList 
+                matches={pendingMatches} 
+                selectedIds={selectedIds} 
+                onSelect={handleSelection} 
+            />
 
-            <main>
-                <MatchCard data={currentMatch} />
+            {/* RIGHT: The Workspace */}
+            <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f0f2f5', position: 'relative' }}>
+                {!selectedIds && (
+                    <div style={styles.centerMessage}>Select a match to review</div>
+                )}
+                
+                {loading && selectedIds && (
+                    <div style={styles.centerMessage}>Loading Details...</div>
+                )}
 
-                {/* CHANGED: Used Flexbox with gap to match the Card's layout logic */}
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '20px' }}>
-                    <button 
-                        onClick={() => handleDecision('reject')}
-                        style={{ ...btnStyle, backgroundColor: '#dc3545' }}>
-                        Reject Match ❌
-                    </button>
-                    
-                    {/* REMOVED: marginLeft: '20px' is no longer needed due to flex gap */}
-                    <button 
-                        onClick={() => handleDecision('approve')}
-                        style={{ ...btnStyle, backgroundColor: '#28a745' }}>
-                        Approve Merge ✅
-                    </button>
-                </div>
-            </main>
+                {!loading && activeMatchData && (
+                    <MatchCard 
+                        data={activeMatchData} 
+                        onDecision={handleDecisionComplete} 
+                    />
+                )}
+            </div>
         </div>
     );
 };
 
-const btnStyle = {
-    padding: '15px 0', // Changed to 0 horizontal padding since we set fixed width
-    width: '200px',    // ADDED: Fixed width ensures the gap is perfectly centered
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    fontSize: '16px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    textAlign: 'center' // Ensures text is centered within the fixed width
+const styles = {
+    centerMessage: {
+        position: 'absolute', top: '50%', left: '50%', 
+        transform: 'translate(-50%, -50%)', 
+        color: '#888', fontSize: '1.2em'
+    }
 };
 
 export default Dashboard;
