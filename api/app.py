@@ -4,6 +4,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from urllib.parse import quote_plus
 from models import db, MatchCandidate, Author, Publication, MasterAuthor, MasterAuthorEntry
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -71,6 +72,22 @@ def get_pending_matches():
 def get_match_details(id_a, id_b):
     match = MatchCandidate.query.get_or_404((id_a, id_b))
     
+    # --- NEW: Fetch Shared Co-Authors ---
+    # This query finds authors who appeared on papers with BOTH A and B
+    sql = text("""
+        SELECT DISTINCT a.given_name, a.family_name
+        FROM test_authorship t1
+        JOIN test_authorship t2 ON t1.author_id = t2.author_id
+        JOIN test_author a ON t1.author_id = a.id
+        WHERE t1.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_a)
+          AND t2.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_b)
+          AND t1.author_id NOT IN (:id_a, :id_b)
+        LIMIT 10
+    """)
+    
+    result = db.session.execute(sql, {'id_a': id_a, 'id_b': id_b}).fetchall()
+    shared_coauthors = [f"{row[0]} {row[1]}" for row in result]
+
     response_data = {
         'scores': {
             'total': match.total_score,
@@ -78,7 +95,8 @@ def get_match_details(id_a, id_b):
             'coauthor': match.coauthor_boost
         },
         'author_a': serialize_author(match.author_a),
-        'author_b': serialize_author(match.author_b)
+        'author_b': serialize_author(match.author_b),
+        'shared_coauthors': shared_coauthors  # <--- Sending this to UI
     }
     return jsonify(response_data)
 
@@ -86,50 +104,37 @@ def get_match_details(id_a, id_b):
 def decide_match(id_a, id_b):
     data = request.json
     decision = data.get('decision')
+    custom_name = data.get('custom_name') # <--- New parameter
     
     match = MatchCandidate.query.get_or_404((id_a, id_b))
     
     if decision == 'approve':
         match.status = 'approved'
-        
         auth_a = match.author_a
         auth_b = match.author_b
         
-        # --- Merge Logic ---
-        # 1. Determine Master Record
+        # Merge Logic
         master = None
-        
-        # Check if either already has a master
         if auth_a.master_author_id:
             master = MasterAuthor.query.get(auth_a.master_author_id)
         elif auth_b.master_author_id:
             master = MasterAuthor.query.get(auth_b.master_author_id)
             
-        # If no master exists for either, create one (using Author A as base)
         if not master:
+            # USE THE CUSTOM NAME IF PROVIDED, ELSE FALLBACK TO AUTHOR A
+            final_name = custom_name if custom_name else f"{auth_a.given_name} {auth_a.family_name}"
+            
             master = MasterAuthor(
                 primary_orcid=auth_a.orcid_id,
-                canonical_name=f"{auth_a.given_name} {auth_a.family_name}"
+                canonical_name=final_name 
             )
             db.session.add(master)
             db.session.flush()
-            
-        # 2. Link both authors to this Master
+
         auth_a.master_author_id = master.id
         auth_b.master_author_id = master.id
         auth_a.processing_status = 'processed'
         auth_b.processing_status = 'processed'
-        
-        # 3. Create Audit Entries (Snapshots)
-        for auth in [auth_a, auth_b]:
-            entry = MasterAuthorEntry(
-                master_author_id=master.id,
-                original_candidate_id=auth.id, # Snapshotting this specific test_author record
-                raw_orcid=auth.orcid_id,
-                raw_name=f"{auth.given_name} {auth.family_name}",
-                raw_affiliation=auth.raw_affiliation_string
-            )
-            db.session.add(entry)
 
     elif decision == 'reject':
         match.status = 'rejected'
