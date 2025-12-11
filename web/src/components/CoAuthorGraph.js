@@ -5,8 +5,9 @@ const CoAuthorGraph = ({ nameA, nameB, shared }) => {
     const data = useMemo(() => {
         // 1. Define Nodes
         const nodes = [
-            { id: 'A', name: nameA, val: 6, color: '#1f77b4', isMain: true },
-            { id: 'B', name: nameB, val: 6, color: '#e377c2', isMain: true },
+            // INCREASED val to 8 to make room for the letter inside
+            { id: 'A', name: nameA, val: 8, color: '#1f77b4', isMain: true },
+            { id: 'B', name: nameB, val: 8, color: '#e377c2', isMain: true },
         ];
         const links = [];
 
@@ -14,7 +15,7 @@ const CoAuthorGraph = ({ nameA, nameB, shared }) => {
             shared.forEach((person, idx) => {
                 const id = `shared_${idx}`;
                 
-                // Scale node size by total overlap
+                // Scale node size by total overlap (min 3, max cap reasonable)
                 const nodeSize = 3 + (person.total_overlap || 1);
 
                 nodes.push({ 
@@ -25,27 +26,27 @@ const CoAuthorGraph = ({ nameA, nameB, shared }) => {
                     isShared: true 
                 });
 
-                // Link to A (Label = count_a)
+                // Link to A
                 links.push({ 
                     source: 'A', 
                     target: id, 
                     width: person.count_a || 1,
                     color: '#aaddaa',
-                    label: String(person.count_a) // The text to show on line
+                    label: String(person.count_a) 
                 });
 
-                // Link to B (Label = count_b)
+                // Link to B
                 links.push({ 
                     source: 'B', 
                     target: id, 
                     width: person.count_b || 1, 
                     color: '#ffaadd',
-                    label: String(person.count_b) // The text to show on line
+                    label: String(person.count_b)
                 });
             });
         }
 
-        // Direct link between A and B (Visual anchor)
+        // Direct link between A and B
         links.push({ source: 'A', target: 'B', color: '#eee', width: 1, label: '' });
 
         return { nodes, links };
@@ -58,41 +59,48 @@ const CoAuthorGraph = ({ nameA, nameB, shared }) => {
             <ForceGraph2D
                 graphData={data}
                 width={400}
-                height={300} // Increased height slightly for labels
+                height={300}
                 
-                // 1. DRAW NODES + LABELS PERMANENTLY
                 nodeCanvasObject={(node, ctx, globalScale) => {
                     const label = node.name;
-                    const fontSize = 12 / globalScale; // Scale font so it stays readable on zoom
+                    const fontSize = 12 / globalScale; 
                     
-                    // Draw Circle
+                    // 1. Draw Circle
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI, false);
                     ctx.fillStyle = node.color;
                     ctx.fill();
 
-                    // Draw Text Label
+                    // 2. Draw "A" or "B" INSIDE the circle (if it's a main node)
+                    if (node.isMain) {
+                        ctx.font = `bold ${10 / globalScale}px Sans-Serif`; // Slightly smaller font for inside
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillStyle = 'white'; // White text contrasts with Blue/Pink
+                        ctx.fillText(node.id, node.x, node.y);
+                    }
+
+                    // 3. Draw Full Name BELOW the circle
                     ctx.font = `${fontSize}px Sans-Serif`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillStyle = node.isMain ? '#000' : '#666'; // Darker text for main authors
+                    ctx.fillStyle = node.isMain ? '#000' : '#666'; 
                     
                     // Position text below the node
-                    ctx.fillText(label, node.x, node.y + node.val + (4 / globalScale)); 
+                    ctx.fillText(label, node.x, node.y + node.val + (6 / globalScale)); 
                 }}
 
-                // 2. DRAW LINKS + NUMBERS ON LINES
                 linkCanvasObject={(link, ctx, globalScale) => {
                     const start = link.source;
                     const end = link.target;
 
-                    if (!start || !end || !start.x || !end.x) return; // Safety check
+                    if (!start || !end || !start.x || !end.x) return; 
 
                     // Draw Line
                     ctx.beginPath();
                     ctx.moveTo(start.x, start.y);
                     ctx.lineTo(end.x, end.y);
-                    ctx.lineWidth = link.width / globalScale; // Scale line width
+                    ctx.lineWidth = link.width / globalScale; 
                     ctx.strokeStyle = link.color;
                     ctx.stroke();
 
@@ -102,14 +110,12 @@ const CoAuthorGraph = ({ nameA, nameB, shared }) => {
                         const midY = start.y + (end.y - start.y) / 2;
                         const fontSize = 10 / globalScale;
 
-                        // Small white background for the number so line doesn't cut through
                         ctx.font = `bold ${fontSize}px Sans-Serif`;
                         const textWidth = ctx.measureText(link.label).width;
                         
                         ctx.fillStyle = 'rgba(255,255,255,0.8)';
                         ctx.fillRect(midX - textWidth / 2 - 1, midY - fontSize / 2 - 1, textWidth + 2, fontSize + 2);
 
-                        // The Number
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
                         ctx.fillStyle = '#555';

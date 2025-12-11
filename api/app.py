@@ -64,7 +64,8 @@ def get_pending_matches():
             'author_id_b': m.author_id_b,
             'name_a': f"{m.author_a.given_name} {m.author_a.family_name}",
             'name_b': f"{m.author_b.given_name} {m.author_b.family_name}",
-            'score': m.total_score
+            'score': m.total_score,
+            'coauthor_score': m.coauthor_boost
         })
     return jsonify(results)
 

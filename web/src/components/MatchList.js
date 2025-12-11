@@ -29,6 +29,11 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
             case 'name-asc':
                 result.sort((a, b) => a.name_a.localeCompare(b.name_a));
                 break;
+            // --- NEW SORT OPTION ---
+            case 'coauthor-desc':
+                // Sort by the coauthor score we just exposed
+                result.sort((a, b) => (b.coauthor_score || 0) - (a.coauthor_score || 0));
+                break;
             default:
                 break;
         }
@@ -36,7 +41,7 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
         return result;
     }, [matches, sortBy, searchQuery]);
 
-    // Keyboard navigation for the list
+    // ... (Keep existing useEffect for keyboard navigation) ...
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.target.tagName === 'INPUT') return;
@@ -104,6 +109,8 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                     <option value="score-desc">Score: High → Low</option>
                     <option value="score-asc">Score: Low → High</option>
                     <option value="name-asc">Name: A → Z</option>
+                    {/* --- NEW OPTION --- */}
+                    <option value="coauthor-desc">Most Shared Co-authors</option>
                 </select>
             </div>
 
@@ -113,6 +120,9 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                         selectedIds.id_a === m.author_id_a && 
                         selectedIds.id_b === m.author_id_b;
                     
+                    // Approximate count: each shared author gives ~20 points
+                    const sharedCount = Math.floor((m.coauthor_score || 0) / 20);
+
                     return (
                         <div 
                             key={`${m.author_id_a}-${m.author_id_b}`}
@@ -124,8 +134,6 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                             }}
                             role="option"
                             tabIndex={0}
-                            aria-selected={isSelected}
-                            onKeyDown={(e) => e.key === 'Enter' && onSelect(m.author_id_a, m.author_id_b)}
                         >
                             <div style={styles.topRow}>
                                 <div style={styles.scoreBadge}>
@@ -135,7 +143,12 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                                     }}>
                                         {m.score.toFixed(0)}%
                                     </span>
-                                    {m.score >= 80 ? '✓' : m.score >= 60 ? '⚠' : '✗'}
+                                    {/* --- NEW: SHARED CO-AUTHOR INDICATOR --- */}
+                                    {sharedCount > 0 && (
+                                        <span style={styles.sharedBadge} title={`${sharedCount} Shared Co-authors`}>
+                                            👥 {sharedCount}
+                                        </span>
+                                    )}
                                 </div>
                                 <small style={styles.indexLabel}>#{index + 1}</small>
                             </div>
@@ -144,7 +157,6 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                                 <span style={styles.vsLabel}>↔</span>
                                 <div style={styles.authorName}>{m.name_b}</div>
                             </div>
-                            {/* Mini score bar */}
                             <div style={styles.miniScoreBar}>
                                 <div style={{
                                     height: '100%',
@@ -157,11 +169,12 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                         </div>
                     );
                 })}
+                {/* ... (Empty states remain same) ... */}
                 {filteredAndSortedMatches.length === 0 && matches.length > 0 && (
                     <div style={styles.empty}>No matches found for "{searchQuery}"</div>
                 )}
                 {matches.length === 0 && (
-                    <div style={styles.emptySuccess}>
+                     <div style={styles.emptySuccess}>
                         <div style={styles.successIcon}>🎉</div>
                         <div style={styles.successTitle}>All Done!</div>
                         <div style={styles.successText}>No pending matches to review.</div>
@@ -169,7 +182,6 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                 )}
             </div>
             
-            {/* Keyboard hints */}
             <div style={styles.footer}>
                 <small style={styles.footerText}>
                     <kbd style={styles.miniKbd}>↑</kbd><kbd style={styles.miniKbd}>↓</kbd> Navigate
@@ -180,6 +192,7 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
 };
 
 const styles = {
+    // ... (Previous styles remain) ...
     listContainer: { width: '320px', borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f8f9fa' },
     header: { padding: '15px', borderBottom: '1px solid #ddd', backgroundColor: '#fff' },
     title: { margin: '0 0 10px 0', color: '#333' },
@@ -195,10 +208,37 @@ const styles = {
     topRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' },
     scoreBadge: { display: 'flex', alignItems: 'center', gap: '5px' },
     scoreText: { color: '#fff', padding: '2px 8px', borderRadius: '10px', fontSize: '0.8em', fontWeight: 'bold' },
+    
+    // --- NEW STYLE FOR THE BADGE ---
+    sharedBadge: { fontSize: '0.75em', color: '#28a745', backgroundColor: '#e6ffe6', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid #c3e6cb' },
+    
     indexLabel: { color: '#aaa', fontSize: '0.75em' },
-    names: { display: 'flex', flexDirection: 'column', gap: '2px' },
-    authorName: { fontSize: '0.9em', color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-    vsLabel: { color: '#999', fontSize: '0.75em', alignSelf: 'center' },
+names: { 
+        display: 'flex', 
+        flexDirection: 'row',       // <--- CHANGED: Aligns items side-by-side
+        alignItems: 'center',       // Vertically centers them
+        justifyContent: 'space-between', 
+        gap: '5px',                 // Space between names and arrow
+        width: '100%'               
+    },
+    
+    authorName: { 
+        fontSize: '0.9em', 
+        color: '#333', 
+        whiteSpace: 'nowrap', 
+        overflow: 'hidden', 
+        textOverflow: 'ellipsis',
+        flex: 1,                    // <--- NEW: Forces names to share width equally
+        textAlign: 'center',        
+        minWidth: 0                 // <--- CRITICAL: Allows ellipsis to work inside flex
+    },
+    
+    vsLabel: { 
+        color: '#999', 
+        fontSize: '0.75em', 
+        flexShrink: 0,              // Prevents the arrow from getting squished
+        padding: '0 2px'
+    },
     miniScoreBar: { marginTop: '8px', height: '3px', backgroundColor: '#e9ecef', borderRadius: '2px', overflow: 'hidden' },
     empty: { padding: '20px', textAlign: 'center', color: '#999' },
     emptySuccess: { padding: '40px 20px', textAlign: 'center' },
