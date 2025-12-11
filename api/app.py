@@ -72,21 +72,36 @@ def get_pending_matches():
 def get_match_details(id_a, id_b):
     match = MatchCandidate.query.get_or_404((id_a, id_b))
     
-    # --- NEW: Fetch Shared Co-Authors ---
-    # This query finds authors who appeared on papers with BOTH A and B
+    # --- UPDATED SQL QUERY ---
+    # We group by the shared author and count distinct papers shared with A vs B
     sql = text("""
-        SELECT DISTINCT a.given_name, a.family_name
+        SELECT 
+            a.given_name, 
+            a.family_name,
+            COUNT(DISTINCT t1.publication_id) as count_a, -- Papers shared with A
+            COUNT(DISTINCT t2.publication_id) as count_b  -- Papers shared with B
         FROM test_authorship t1
         JOIN test_authorship t2 ON t1.author_id = t2.author_id
         JOIN test_author a ON t1.author_id = a.id
         WHERE t1.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_a)
           AND t2.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_b)
           AND t1.author_id NOT IN (:id_a, :id_b)
+        GROUP BY a.id, a.given_name, a.family_name
+        ORDER BY (COUNT(DISTINCT t1.publication_id) + COUNT(DISTINCT t2.publication_id)) DESC
         LIMIT 10
     """)
     
     result = db.session.execute(sql, {'id_a': id_a, 'id_b': id_b}).fetchall()
-    shared_coauthors = [f"{row[0]} {row[1]}" for row in result]
+    
+    # Structure the data as objects instead of just strings
+    shared_coauthors = []
+    for row in result:
+        shared_coauthors.append({
+            'name': f"{row[0]} {row[1]}",
+            'count_a': row[2],
+            'count_b': row[3],
+            'total_overlap': row[2] + row[3]
+        })
 
     response_data = {
         'scores': {
@@ -96,7 +111,7 @@ def get_match_details(id_a, id_b):
         },
         'author_a': serialize_author(match.author_a),
         'author_b': serialize_author(match.author_b),
-        'shared_coauthors': shared_coauthors  # <--- Sending this to UI
+        'shared_coauthors': shared_coauthors 
     }
     return jsonify(response_data)
 
