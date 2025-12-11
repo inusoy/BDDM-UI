@@ -93,12 +93,7 @@ See `database schema.sql` for complete schema details.
    FLASK_ENV=development
    ```
 
-3. **Initialize the database:**
-   ```bash
-   psql -U your_db_user -h your_db_host -d your_db_name -f "database schema.sql"
-   ```
-
-4. **Run the Flask server:**
+3. **Run the Flask server:**
    ```bash
    cd api
    python app.py
