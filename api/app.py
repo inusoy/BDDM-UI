@@ -63,7 +63,8 @@ def get_pending_matches():
         
     results = []
     for m in matches:
-        # Quick count for the list view badge
+        # 1. STRICT DIRECT COUNT: Mutual Co-authors only
+        # Finds Author X who wrote a paper with A AND a paper with B
         count_sql = text("""
             SELECT COUNT(DISTINCT t1.author_id)
             FROM test_authorship t1
@@ -77,6 +78,31 @@ def get_pending_matches():
             'id_b': m.author_id_b
         }).scalar() or 0
         
+        # 2. PATH EXISTENCE CHECK (If no direct shared, check for chain)
+        has_path = False
+        if shared_count > 0:
+            has_path = True
+        else:
+            # Recursive check (Limit 1 just to see if ANY path exists)
+            # Depth 4 is enough for a "preview" check
+            path_check_sql = text("""
+                WITH RECURSIVE path_check(last_author_id, depth, path) AS (
+                    SELECT id, 0, ARRAY[id] FROM test_author WHERE id = :id_a
+                    UNION ALL
+                    SELECT t_next.author_id, p.depth + 1, p.path || t_next.author_id
+                    FROM path_check p
+                    JOIN test_authorship t_curr ON p.last_author_id = t_curr.author_id
+                    JOIN test_authorship t_next ON t_curr.publication_id = t_next.publication_id
+                    WHERE p.depth < 4
+                      AND t_next.author_id != ALL(p.path)
+                )
+                SELECT 1 FROM path_check WHERE last_author_id = :id_b LIMIT 1
+            """)
+            has_path = db.session.execute(path_check_sql, {
+                'id_a': m.author_id_a, 
+                'id_b': m.author_id_b
+            }).scalar() is not None
+
         results.append({
             'author_id_a': m.author_id_a,
             'author_id_b': m.author_id_b,
@@ -84,7 +110,8 @@ def get_pending_matches():
             'name_b': f"{m.author_b.given_name} {m.author_b.family_name}",
             'score': m.total_score,
             'coauthor_score': m.coauthor_boost,
-            'shared_coauthor_count': shared_count
+            'shared_coauthor_count': shared_count, # True Direct Count
+            'has_path': has_path # True if ANY connection exists (Direct or Chain)
         })
     return jsonify(results)
 
@@ -93,7 +120,6 @@ def get_match_details(id_a, id_b):
     match = MatchCandidate.query.get_or_404((id_a, id_b))
     
     # --- RECURSIVE GRAPH QUERY (Depth 6) ---
-    # Finds chains like A -> B -> C -> D (needed for Scenario D)
     sql_graph = text("""
         WITH RECURSIVE path_search(last_author_id, path_ids, depth) AS (
             SELECT id, ARRAY[id], 0
@@ -106,7 +132,7 @@ def get_match_details(id_a, id_b):
             FROM path_search p
             JOIN test_authorship t_curr ON p.last_author_id = t_curr.author_id
             JOIN test_authorship t_next ON t_curr.publication_id = t_next.publication_id
-            WHERE p.depth < 6  -- Deep search for long chains
+            WHERE p.depth < 6 
               AND t_next.author_id != ALL(p.path_ids)
         )
         SELECT DISTINCT path_ids, array_length(path_ids, 1) as path_len 
@@ -118,62 +144,40 @@ def get_match_details(id_a, id_b):
     
     raw_paths = db.session.execute(sql_graph, {'id_a': id_a, 'id_b': id_b}).fetchall()
     
-    # Process into Nodes & Links
+    # Build Graph Data
     nodes_map = {}
     links_list = []
     existing_links = set()
 
-    # Always include A and B
-    nodes_map[id_a] = { 
-        'id': 'A', 'real_id': id_a, 
-        'name': f"{match.author_a.given_name} {match.author_a.family_name}", 
-        'group': 'main' 
-    }
-    nodes_map[id_b] = { 
-        'id': 'B', 'real_id': id_b, 
-        'name': f"{match.author_b.given_name} {match.author_b.family_name}", 
-        'group': 'main' 
-    }
+    nodes_map[id_a] = { 'id': 'A', 'real_id': id_a, 'name': f"{match.author_a.given_name} {match.author_a.family_name}", 'group': 'main' }
+    nodes_map[id_b] = { 'id': 'B', 'real_id': id_b, 'name': f"{match.author_b.given_name} {match.author_b.family_name}", 'group': 'main' }
 
     all_ids = set()
     for row in raw_paths:
         path = row[0]
         for pid in path: all_ids.add(pid)
-        
-        # Build Links along the path
         for i in range(len(path) - 1):
             src, tgt = path[i], path[i+1]
             v_src = 'A' if src == id_a else ('B' if src == id_b else str(src))
             v_tgt = 'A' if tgt == id_a else ('B' if tgt == id_b else str(tgt))
-            
             link_key = tuple(sorted((v_src, v_tgt)))
             if link_key not in existing_links:
                 links_list.append({ 'source': v_src, 'target': v_tgt })
                 existing_links.add(link_key)
 
-    # Fetch names for intermediate nodes (the "bridge" authors)
     missing = [x for x in all_ids if x not in (id_a, id_b)]
     if missing:
         if len(missing) == 1: missing_tuple = f"({missing[0]})"
         else: missing_tuple = tuple(missing)
-        
         res = db.session.execute(text(f"SELECT id, given_name, family_name FROM test_author WHERE id IN {missing_tuple}")).fetchall()
         for r in res:
-            nodes_map[r.id] = { 
-                'id': str(r.id), 
-                'name': f"{r.given_name} {r.family_name}", 
-                'group': 'intermediate' 
-            }
+            nodes_map[r.id] = { 'id': str(r.id), 'name': f"{r.given_name} {r.family_name}", 'group': 'intermediate' }
 
     response_data = {
-        'scores': {
-            'total': match.total_score,
-            'name_sim': match.name_score,
-            'coauthor': match.coauthor_boost
-        },
+        'scores': { 'total': match.total_score, 'name_sim': match.name_score, 'coauthor': match.coauthor_boost },
         'author_a': serialize_author(match.author_a),
         'author_b': serialize_author(match.author_b),
-        'graph_data': { 'nodes': list(nodes_map.values()), 'links': links_list } # <--- Sending graph_data
+        'graph_data': { 'nodes': list(nodes_map.values()), 'links': links_list }
     }
     return jsonify(response_data)
 
@@ -182,24 +186,19 @@ def decide_match(id_a, id_b):
     data = request.json
     decision = data.get('decision')
     custom_name = data.get('custom_name')
-    
     match = MatchCandidate.query.get_or_404((id_a, id_b))
     
     if decision == 'approve':
         match.status = 'approved'
         auth_a = match.author_a
         auth_b = match.author_b
-        
         master = None
-        if auth_a.master_author_id:
-            master = MasterAuthor.query.get(auth_a.master_author_id)
-        elif auth_b.master_author_id:
-            master = MasterAuthor.query.get(auth_b.master_author_id)
+        if auth_a.master_author_id: master = MasterAuthor.query.get(auth_a.master_author_id)
+        elif auth_b.master_author_id: master = MasterAuthor.query.get(auth_b.master_author_id)
             
         if not master:
             final_name = (custom_name.strip() if isinstance(custom_name, str) and custom_name.strip() else f"{auth_a.given_name} {auth_a.family_name}")
             primary_orcid = auth_a.orcid_id or auth_b.orcid_id
-
             master = MasterAuthor(primary_orcid=primary_orcid, canonical_name=final_name)
             db.session.add(master)
             db.session.flush()
@@ -211,9 +210,6 @@ def decide_match(id_a, id_b):
 
     elif decision == 'reject':
         match.status = 'rejected'
-    
-    else:
-        return jsonify({'error': 'Invalid decision'}), 400
     
     db.session.commit()
     return jsonify({'success': True, 'status': match.status})
