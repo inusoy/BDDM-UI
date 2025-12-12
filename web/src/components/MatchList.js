@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 
-const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
+const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0, hasMore = false, onLoadMore, listLoading = false }) => {
     const [sortBy, setSortBy] = useState('score-desc');
     const [searchQuery, setSearchQuery] = useState('');
     const listRef = useRef(null);
@@ -120,8 +120,8 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                         selectedIds.id_a === m.author_id_a && 
                         selectedIds.id_b === m.author_id_b;
                     
-                    // Approximate count: each shared author gives ~20 points
-                    const sharedCount = Math.floor((m.coauthor_score || 0) / 20);
+                    // Use the actual count from the API
+                    const sharedCount = m.shared_coauthor_count || 0;
 
                     return (
                         <div 
@@ -186,6 +186,15 @@ const MatchList = ({ matches, onSelect, selectedIds, reviewedCount = 0 }) => {
                 <small style={styles.footerText}>
                     <kbd style={styles.miniKbd}>↑</kbd><kbd style={styles.miniKbd}>↓</kbd> Navigate
                 </small>
+                {hasMore && (
+                    <button
+                        style={styles.loadMoreBtn}
+                        onClick={onLoadMore}
+                        disabled={listLoading}
+                    >
+                        {listLoading ? 'Loading…' : 'Load more'}
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -245,9 +254,10 @@ names: {
     successIcon: { fontSize: '3em', marginBottom: '10px' },
     successTitle: { fontSize: '1.2em', fontWeight: 'bold', color: '#28a745', marginBottom: '5px' },
     successText: { color: '#666' },
-    footer: { padding: '10px 15px', borderTop: '1px solid #eee', backgroundColor: '#fff', textAlign: 'center' },
-    footerText: { color: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' },
-    miniKbd: { display: 'inline-block', padding: '2px 5px', fontSize: '0.75em', backgroundColor: '#f0f0f0', border: '1px solid #ccc', borderRadius: '3px' }
+    footer: { padding: '10px 15px', borderTop: '1px solid #eee', backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' },
+    footerText: { color: '#888', display: 'flex', alignItems: 'center', gap: '5px' },
+    miniKbd: { display: 'inline-block', padding: '2px 5px', fontSize: '0.75em', backgroundColor: '#f0f0f0', border: '1px solid #ccc', borderRadius: '3px' },
+    loadMoreBtn: { padding: '6px 10px', borderRadius: '4px', border: '1px solid #007bff', backgroundColor: '#007bff', color: '#fff', cursor: 'pointer', fontSize: '0.85em' }
 };
 
 export default MatchList;

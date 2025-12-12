@@ -35,10 +35,14 @@ const toastStyles = {
 };
 
 const Dashboard = () => {
+    const PAGE_SIZE = 50;
     const [pendingMatches, setPendingMatches] = useState([]);
     const [selectedIds, setSelectedIds] = useState(null); // { id_a, id_b }
     const [activeMatchData, setActiveMatchData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [listLoading, setListLoading] = useState(false);
+    const [nextOffset, setNextOffset] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
     const [reviewedCount, setReviewedCount] = useState(0);
     const [toasts, setToasts] = useState([]);
 
@@ -55,23 +59,36 @@ const Dashboard = () => {
         setToasts(prev => prev.filter(t => t.id !== id));
     }, []);
 
-    const fetchPendingList = useCallback(async () => {
+    const fetchPendingList = useCallback(async (append = false) => {
         try {
-            const res = await axios.get('http://127.0.0.1:5000/api/matches/pending');
-            setPendingMatches(res.data);
-            
-            // Auto-select the first item if nothing is selected and list is not empty
-            if (res.data.length > 0) {
-                setSelectedIds(prev => prev || { id_a: res.data[0].author_id_a, id_b: res.data[0].author_id_b });
-            }
+            setListLoading(true);
+            const offset = append ? nextOffset : 0;
+            const res = await axios.get('http://127.0.0.1:5000/api/matches/pending', {
+                params: { limit: PAGE_SIZE, offset }
+            });
+
+            const data = res.data;
+
+            setPendingMatches(prev => {
+                const combined = append ? [...prev, ...data] : data;
+                if (!selectedIds && combined.length > 0) {
+                    setSelectedIds({ id_a: combined[0].author_id_a, id_b: combined[0].author_id_b });
+                }
+                return combined;
+            });
+
+            setNextOffset(offset + data.length);
+            setHasMore(data.length === PAGE_SIZE);
         } catch (err) {
             console.error(err);
+        } finally {
+            setListLoading(false);
         }
-    }, []);
+    }, [PAGE_SIZE, nextOffset, selectedIds]);
 
     // 1. Load the List on Mount
     useEffect(() => {
-        fetchPendingList();
+        fetchPendingList(false);
     }, [fetchPendingList]);
 
     // 2. When selection changes, fetch the full details for the Card
@@ -135,6 +152,12 @@ const Dashboard = () => {
         showToast('info', 'Skipped - moved to end of queue');
     };
 
+    const handleLoadMore = () => {
+        if (hasMore && !listLoading) {
+            fetchPendingList(true);
+        }
+    };
+
     return (
         <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
             {/* Toast Notifications */}
@@ -145,6 +168,9 @@ const Dashboard = () => {
                 matches={pendingMatches} 
                 selectedIds={selectedIds} 
                 onSelect={handleSelection}
+                onLoadMore={handleLoadMore}
+                hasMore={hasMore}
+                listLoading={listLoading}
                 reviewedCount={reviewedCount}
             />
 

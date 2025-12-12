@@ -53,19 +53,39 @@ def serialize_author(auth):
 @app.route('/api/matches/pending', methods=['GET'])
 def get_pending_matches():
     # Fetch pending matches joining with Author details for preview
-    matches = MatchCandidate.query.filter_by(status='pending')\
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+
+    query = MatchCandidate.query.filter_by(status='pending')\
         .join(Author, MatchCandidate.author_id_a == Author.id)\
-        .order_by(MatchCandidate.total_score.desc()).limit(50).all()
+        .order_by(MatchCandidate.total_score.desc())
+
+    matches = query.limit(limit).offset(offset).all()
         
     results = []
     for m in matches:
+        # Quick count of shared coauthors for preview
+        count_sql = text("""
+            SELECT COUNT(DISTINCT t1.author_id)
+            FROM test_authorship t1
+            JOIN test_authorship t2 ON t1.author_id = t2.author_id
+            WHERE t1.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_a)
+              AND t2.publication_id IN (SELECT publication_id FROM test_authorship WHERE author_id = :id_b)
+              AND t1.author_id NOT IN (:id_a, :id_b)
+        """)
+        shared_count = db.session.execute(count_sql, {
+            'id_a': m.author_id_a, 
+            'id_b': m.author_id_b
+        }).scalar() or 0
+        
         results.append({
             'author_id_a': m.author_id_a,
             'author_id_b': m.author_id_b,
             'name_a': f"{m.author_a.given_name} {m.author_a.family_name}",
             'name_b': f"{m.author_b.given_name} {m.author_b.family_name}",
             'score': m.total_score,
-            'coauthor_score': m.coauthor_boost
+            'coauthor_score': m.coauthor_boost,
+            'shared_coauthor_count': shared_count
         })
     return jsonify(results)
 
@@ -137,12 +157,15 @@ def decide_match(id_a, id_b):
             master = MasterAuthor.query.get(auth_b.master_author_id)
             
         if not master:
-            # USE THE CUSTOM NAME IF PROVIDED, ELSE FALLBACK TO AUTHOR A
-            final_name = custom_name if custom_name else f"{auth_a.given_name} {auth_a.family_name}"
-            
+            # USE THE CUSTOM NAME IF PROVIDED (non-empty), ELSE FALLBACK TO AUTHOR A
+            final_name = (custom_name.strip() if isinstance(custom_name, str) and custom_name.strip() else f"{auth_a.given_name} {auth_a.family_name}")
+
+            # Prefer a non-empty ORCID from either author when setting primary_orcid
+            primary_orcid = auth_a.orcid_id or auth_b.orcid_id
+
             master = MasterAuthor(
-                primary_orcid=auth_a.orcid_id,
-                canonical_name=final_name 
+                primary_orcid=primary_orcid,
+                canonical_name=final_name
             )
             db.session.add(master)
             db.session.flush()
