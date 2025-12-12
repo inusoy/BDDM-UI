@@ -26,3 +26,4 @@ web/.env.production.local
 web/npm-debug.log*
 web/yarn-debug.log*
 web/yarn-error.log*
+api/__pycache__/

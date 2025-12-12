@@ -4,14 +4,11 @@ import CoAuthorGraph from './CoAuthorGraph';
 import axios from 'axios';
 
 const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
-    // State for the "Golden Record" name
     const [mergedName, setMergedName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    // Initialize mergedName when data loads
     useEffect(() => {
         if (data) {
-            // Default to the longer name as it usually has more info
             const nameA = data.author_a.name;
             const nameB = data.author_b.name;
             setMergedName(nameA.length >= nameB.length ? nameA : nameB);
@@ -24,7 +21,7 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
         try {
             await axios.post(`http://127.0.0.1:5000/api/match/${data.author_a_id}/${data.author_b_id}/decide`, {
                 decision,
-                custom_name: mergedName // Send the edited name
+                custom_name: mergedName 
             });
             if (showToast) {
                 showToast(
@@ -32,7 +29,7 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                     decision === 'approve' ? 'Match Approved!' : 'Match Rejected'
                 );
             }
-            onDecision(); // Callback to parent to refresh/load next
+            onDecision(); 
         } catch (err) {
             console.error(err);
             if (showToast) {
@@ -46,38 +43,25 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
     // Keyboard Hotkeys
     useEffect(() => {
         const handleKeyDown = (e) => {
-            // Only trigger if not typing in an input field
             if (e.target.tagName === 'INPUT') return;
-
             switch(e.key) {
-                case 'a': 
-                case 'A': 
-                    handleDecide('approve'); 
-                    break;
-                case 'r': 
-                case 'R': 
-                    handleDecide('reject'); 
-                    break;
-                case 'ArrowRight':
-                case 's':
-                case 'S': 
-                    if (onSkip) onSkip();
-                    break;
+                case 'a': case 'A': handleDecide('approve'); break;
+                case 'r': case 'R': handleDecide('reject'); break;
+                case 'ArrowRight': case 's': case 'S': if (onSkip) onSkip(); break;
                 default: break;
             }
         };
-
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [handleDecide, onSkip]);
 
     if (!data) return <div>Loading...</div>;
 
-    const { author_a, author_b, scores, shared_coauthors } = data;
+    // Destructure new graph_data field
+    const { author_a, author_b, scores, graph_data } = data;
 
     return (
         <div style={styles.card}>
-            {/* --- HEADER: Scores & Hotkey Hints --- */}
             <div style={styles.header}>
                 <div style={styles.scoreSection}>
                     <div style={styles.scoreContainer}>
@@ -92,7 +76,6 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                         color: scores.total >= 0.8 ? '#28a745' : scores.total >= 0.6 ? '#ffc107' : '#dc3545' 
                     }}>
                             {scores.total.toFixed(0)}% Match
-                        {scores.total >= 0.8 ? ' ✓' : scores.total >= 0.6 ? ' ⚠' : ' ✗'}
                     </h2>
                     <small style={styles.scoreDetails}>
                             Name Similarity: {scores.name_sim.toFixed(0)}% | Co-Author Boost: +{scores.coauthor.toFixed(0)}%
@@ -106,7 +89,6 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
             </div>
             
             <div style={styles.grid}>
-                {/* --- LEFT: Author Comparison --- */}
                 <div style={styles.column}>
                     <div style={styles.row}>
                         <div style={styles.cell}>
@@ -121,7 +103,6 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                         </div>
                     </div>
                     
-                    {/* Publication Lists */}
                     <div style={styles.row}>
                         <div style={styles.cell}>
                             <ul style={styles.pubList}>
@@ -140,19 +121,13 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                     </div>
                 </div>
 
-                {/* --- RIGHT: Evidence & Actions --- */}
                 <div style={styles.sidebar}>
-                    {/* Evidence Graph */}
                     <div style={{marginBottom: '20px'}}>
-                        <h4>Shared Co-Authors</h4>
-                        <CoAuthorGraph 
-                            nameA={author_a.family_name} 
-                            nameB={author_b.family_name} 
-                            shared={shared_coauthors || []} 
-                        />
+                        <h4>Connection Graph</h4>
+                        {/* UPDATE: Pass graphData instead of name/shared */}
+                        <CoAuthorGraph graphData={graph_data} />
                     </div>
 
-                    {/* Golden Record Preview */}
                     <div style={styles.actionBox}>
                         <h4>Merge Result Preview</h4>
                         <label style={{display:'block', fontSize:'0.8em', marginBottom:'5px'}}>Primary Name (Editable)</label>
@@ -160,21 +135,18 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                             style={styles.input}
                             value={mergedName}
                             onChange={(e) => setMergedName(e.target.value)}
-                            aria-label="Merged author name"
                         />
                         <div style={styles.buttonGroup}>
                             <button 
                                 style={{...styles.btnReject, opacity: isSubmitting ? 0.6 : 1}} 
                                 onClick={() => handleDecide('reject')}
                                 disabled={isSubmitting}
-                                aria-label="Reject match"
                             >
                                 {isSubmitting ? '...' : '✗ Reject'}
                             </button>
                             <button 
                                 style={styles.btnSkip} 
                                 onClick={() => onSkip && onSkip()}
-                                aria-label="Skip this match"
                             >
                                 ⏭ Skip
                             </button>
@@ -182,7 +154,6 @@ const MatchCard = ({ data, onDecision, onSkip, showToast }) => {
                                 style={{...styles.btnApprove, opacity: isSubmitting ? 0.6 : 1}} 
                                 onClick={() => handleDecide('approve')}
                                 disabled={isSubmitting}
-                                aria-label="Approve merge"
                             >
                                 {isSubmitting ? '...' : '✓ Approve'}
                             </button>
